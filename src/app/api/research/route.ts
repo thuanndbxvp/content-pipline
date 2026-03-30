@@ -3,6 +3,64 @@ import type { ResearchArticle } from "@/lib/types";
 
 export const maxDuration = 60;
 
+interface BraveWebResult {
+  title: string;
+  url: string;
+  description?: string;
+  age?: string;
+  page_age?: string;
+  meta_url?: { hostname?: string };
+}
+
+interface BraveNewsResult {
+  title: string;
+  url: string;
+  description?: string;
+  age?: string;
+  meta_url?: { hostname?: string; netloc?: string };
+}
+
+function parseAge(age: string): number {
+  // Convert Brave age strings to hours for sorting
+  // "2 hours ago" → 2, "3 days ago" → 72, "1 week ago" → 168
+  const match = age.match(/(\d+)\s*(hour|day|week|month)/i);
+  if (!match) return 9999;
+  const num = parseInt(match[1]);
+  const unit = match[2].toLowerCase();
+  if (unit === "hour") return num;
+  if (unit === "day") return num * 24;
+  if (unit === "week") return num * 168;
+  if (unit === "month") return num * 720;
+  return 9999;
+}
+
+function extractSource(url: string, metaUrl?: { hostname?: string; netloc?: string }): string {
+  const hostname = metaUrl?.hostname || metaUrl?.netloc || new URL(url).hostname;
+  const clean = hostname
+    .replace(/^www\./, "")
+    .replace(/\.com$|\.org$|\.net$|\.io$|\.co$/, "");
+  // Map known domains
+  const domainMap: Record<string, string> = {
+    techcrunch: "TechCrunch",
+    crunchbase: "Crunchbase",
+    forbes: "Forbes",
+    bloomberg: "Bloomberg",
+    reuters: "Reuters",
+    cnbc: "CNBC",
+    venturebeat: "VentureBeat",
+    theverge: "The Verge",
+    wired: "Wired",
+    sifted: "Sifted",
+    pitchbook: "PitchBook",
+    "the-information": "The Information",
+    axios: "Axios",
+    businessinsider: "Business Insider",
+    linkedin: "LinkedIn",
+  };
+  const key = clean.split(".").pop() || clean;
+  return domainMap[key] || key.charAt(0).toUpperCase() + key.slice(1);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { topic } = await req.json();
@@ -22,66 +80,101 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Search with Brave
-    const searchUrl = new URL("https://api.search.brave.com/res/v1/web/search");
-    searchUrl.searchParams.set("q", topic);
-    searchUrl.searchParams.set("count", "20");
-    searchUrl.searchParams.set("freshness", "pm"); // past month
-    searchUrl.searchParams.set("text_decorations", "false");
+    const headers = {
+      Accept: "application/json",
+      "Accept-Encoding": "gzip",
+      "X-Subscription-Token": braveApiKey,
+    };
 
-    const searchRes = await fetch(searchUrl.toString(), {
-      headers: {
-        Accept: "application/json",
-        "Accept-Encoding": "gzip",
-        "X-Subscription-Token": braveApiKey,
-      },
-    });
+    // Run Web Search + News Search in parallel for best coverage
+    const [webRes, newsRes] = await Promise.all([
+      fetch(
+        `https://api.search.brave.com/res/v1/web/search?${new URLSearchParams({
+          q: topic,
+          count: "20",
+          freshness: "pm",
+          text_decorations: "false",
+        })}`,
+        { headers }
+      ),
+      fetch(
+        `https://api.search.brave.com/res/v1/news/search?${new URLSearchParams({
+          q: topic,
+          count: "15",
+          freshness: "pw", // past week for news — most recent
+        })}`,
+        { headers }
+      ).catch(() => null), // News search may fail on some plans
+    ]);
 
-    if (!searchRes.ok) {
-      const errText = await searchRes.text();
+    if (!webRes.ok) {
+      const errText = await webRes.text();
       return NextResponse.json(
-        { error: `Brave Search failed: ${searchRes.status} ${errText}` },
+        { error: `Brave Search failed: ${webRes.status} ${errText}` },
         { status: 502 }
       );
     }
 
-    const searchData = await searchRes.json();
-    const webResults = searchData.web?.results || [];
+    const webData = await webRes.json();
+    const webResults: BraveWebResult[] = webData.web?.results || [];
 
-    // Structure Brave results directly — no Claude call needed
-    // This keeps the research step fast (<3s)
-    const articles: ResearchArticle[] = webResults
-      .filter((r: { title?: string; url?: string }) => r.title && r.url)
-      .map((r: { title: string; url: string; description?: string; age?: string; page_age?: string; meta_url?: { hostname?: string } }, i: number) => {
-        // Extract source from hostname
-        const hostname = r.meta_url?.hostname || new URL(r.url).hostname;
-        const source = hostname
-          .replace(/^www\./, "")
-          .replace(/\.com$|\.org$|\.net$|\.io$/, "")
-          .split(".")
-          .pop() || hostname;
-        const sourceName = source.charAt(0).toUpperCase() + source.slice(1);
+    let newsResults: BraveNewsResult[] = [];
+    if (newsRes?.ok) {
+      const newsData = await newsRes.json();
+      newsResults = newsData.results || [];
+    }
 
-        // Extract date from age field
-        const age = r.age || r.page_age || "";
-        let date = "Recent";
-        if (age) {
-          // Brave returns things like "2 days ago", "March 15, 2026"
-          date = age;
-        }
+    // Combine and deduplicate by URL
+    const seen = new Set<string>();
+    const combined: { title: string; url: string; description: string; age: string; source: string; isNews: boolean }[] = [];
 
-        return {
-          id: `article-${i}-${Date.now()}`,
-          title: r.title,
-          source: sourceName,
-          url: r.url,
-          date,
-          summary: r.description || "",
-          keyData: "",
-          selected: false,
-        };
-      })
-      .slice(0, 15);
+    // News results first — they're fresher and more relevant
+    for (const r of newsResults) {
+      if (!r.title || !r.url || seen.has(r.url)) continue;
+      seen.add(r.url);
+      combined.push({
+        title: r.title,
+        url: r.url,
+        description: r.description || "",
+        age: r.age || "",
+        source: extractSource(r.url, r.meta_url),
+        isNews: true,
+      });
+    }
+
+    // Then web results
+    for (const r of webResults) {
+      if (!r.title || !r.url || seen.has(r.url)) continue;
+      seen.add(r.url);
+      combined.push({
+        title: r.title,
+        url: r.url,
+        description: r.description || "",
+        age: r.age || r.page_age || "",
+        source: extractSource(r.url, r.meta_url),
+        isNews: false,
+      });
+    }
+
+    // Sort: news first, then by freshness (smallest age = most recent)
+    combined.sort((a, b) => {
+      // News always on top
+      if (a.isNews && !b.isNews) return -1;
+      if (!a.isNews && b.isNews) return 1;
+      // Then by age (most recent first)
+      return parseAge(a.age) - parseAge(b.age);
+    });
+
+    const articles: ResearchArticle[] = combined.slice(0, 15).map((r, i) => ({
+      id: `article-${i}-${Date.now()}`,
+      title: r.title,
+      source: r.source,
+      url: r.url,
+      date: r.age || "Recent",
+      summary: r.description,
+      keyData: r.isNews ? "News" : "",
+      selected: false,
+    }));
 
     return NextResponse.json({ articles });
   } catch (error) {

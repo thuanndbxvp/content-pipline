@@ -1,19 +1,37 @@
 import { BRAND_CONTEXT } from "../context";
-import type { ResearchArticle } from "../types";
+import type { ResearchArticle, PostLength } from "../types";
 
-export function toplistPrompt(article: ResearchArticle): string {
+const lengthGuide: Record<PostLength, string> = {
+  short: "Total length: 80-150 words (500-800 characters). Keep it punchy — 3-5 list items max.",
+  medium: "Total length: 150-250 words (800-1500 characters). Standard LinkedIn post — 5-7 list items.",
+  long: "Total length: 250-400 words (1500-2500 characters). Comprehensive list — 7-10 items with details.",
+};
+
+function formatArticle(a: ResearchArticle): string {
+  return `Title: ${a.title}\nSource: ${a.source}\nDate: ${a.date}\nSummary: ${a.summary}\nURL: ${a.url}`;
+}
+
+export function toplistPrompt(
+  article: ResearchArticle,
+  length: PostLength = "medium",
+  allArticles?: ResearchArticle[],
+  postIndex?: number,
+  totalPosts?: number
+): string {
+  const contextSection = allArticles && allArticles.length > 1
+    ? `\n## All Source Articles (use as additional context/data)\n${allArticles.map((a, i) => `${i + 1}. ${formatArticle(a)}`).join("\n\n")}\n\n## Primary Article (focus on this one)\n${formatArticle(article)}`
+    : `## Source Article\n${formatArticle(article)}`;
+
+  const multiPostNote = totalPosts && totalPosts > 1 && postIndex !== undefined
+    ? `\n\n## Multi-post Note\nThis is post ${postIndex + 1} of ${totalPosts}. Each post should have a DIFFERENT angle/focus. Don't repeat the same content across posts.`
+    : "";
+
   return `${BRAND_CONTEXT}
 
 ## Task
-Write a LinkedIn Toplist post based on this source article. The post should curate and present key items from the source in a numbered list format.
+Write a LinkedIn Toplist post. The post should curate and present key items in a numbered list format.
 
-## Source Article
-Title: ${article.title}
-Source: ${article.source}
-Date: ${article.date}
-Summary: ${article.summary}
-Key Data: ${article.keyData}
-URL: ${article.url}
+${contextSection}${multiPostNote}
 
 ## Toplist Format Structure
 1. HOOK (1-2 lines): Start with a compelling stat or bold claim that stops the scroll
@@ -25,8 +43,10 @@ URL: ${article.url}
 4. TAKEAWAY (2-3 lines): What pattern emerges, what it means for the reader
 5. CTA: Engagement question OR soft Affitor mention
 
+## Length
+${lengthGuide[length]}
+
 ## Constraints
-- Total length: 1000-2000 characters
 - Every item must have specific data from the source
 - Use numbered list (1, 2, 3...) with → for sub-details
 - No generic filler — every sentence adds value

@@ -2,12 +2,12 @@ import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 
 export const maxDuration = 60;
-import type { ResearchArticle, ContentFormat } from "@/lib/types";
+import type { ResearchArticle, ContentFormat, PostLength } from "@/lib/types";
 import { toplistPrompt } from "@/lib/prompts/toplist";
 import { povPrompt } from "@/lib/prompts/pov";
 import { caseStudyPrompt } from "@/lib/prompts/case-study";
 
-const promptFns: Record<ContentFormat, (a: ResearchArticle) => string> = {
+const promptFns: Record<ContentFormat, (a: ResearchArticle, l: PostLength, allArticles?: ResearchArticle[], postIndex?: number, totalPosts?: number) => string> = {
   toplist: toplistPrompt,
   pov: povPrompt,
   "case-study": caseStudyPrompt,
@@ -15,9 +15,13 @@ const promptFns: Record<ContentFormat, (a: ResearchArticle) => string> = {
 
 export async function POST(req: NextRequest) {
   try {
-    const { article, format } = (await req.json()) as {
+    const { article, format, length = "medium", allArticles, postIndex, totalPosts } = (await req.json()) as {
       article: ResearchArticle;
       format: ContentFormat;
+      length?: PostLength;
+      allArticles?: ResearchArticle[];
+      postIndex?: number;
+      totalPosts?: number;
     };
 
     if (!article || !format) {
@@ -43,7 +47,7 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: "user",
-          content: promptFn(article),
+          content: promptFn(article, length, allArticles, postIndex, totalPosts),
         },
       ],
     });

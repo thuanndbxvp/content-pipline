@@ -1,19 +1,37 @@
 import { BRAND_CONTEXT } from "../context";
-import type { ResearchArticle } from "../types";
+import type { ResearchArticle, PostLength } from "../types";
 
-export function caseStudyPrompt(article: ResearchArticle): string {
+const lengthGuide: Record<PostLength, string> = {
+  short: "Total length: 80-150 words (500-800 characters). Quick case snapshot — hook + key result + lesson.",
+  medium: "Total length: 150-250 words (800-1500 characters). Standard case study with full narrative arc.",
+  long: "Total length: 250-400 words (1500-2500 characters). Deep case analysis with context and implications.",
+};
+
+function formatArticle(a: ResearchArticle): string {
+  return `Title: ${a.title}\nSource: ${a.source}\nDate: ${a.date}\nSummary: ${a.summary}\nURL: ${a.url}`;
+}
+
+export function caseStudyPrompt(
+  article: ResearchArticle,
+  length: PostLength = "medium",
+  allArticles?: ResearchArticle[],
+  postIndex?: number,
+  totalPosts?: number
+): string {
+  const contextSection = allArticles && allArticles.length > 1
+    ? `\n## All Source Articles (use as additional context/data)\n${allArticles.map((a, i) => `${i + 1}. ${formatArticle(a)}`).join("\n\n")}\n\n## Primary Article (focus on this one for the case study)\n${formatArticle(article)}`
+    : `## Source Article\n${formatArticle(article)}`;
+
+  const multiPostNote = totalPosts && totalPosts > 1 && postIndex !== undefined
+    ? `\n\n## Multi-post Note\nThis is post ${postIndex + 1} of ${totalPosts}. Each post should focus on a DIFFERENT company/event. Don't repeat the same case.`
+    : "";
+
   return `${BRAND_CONTEXT}
 
 ## Task
-Write a LinkedIn Case Study post based on this source article. Deep-dive into ONE specific company/event with a narrative arc.
+Write a LinkedIn Case Study post. Deep-dive into ONE specific company/event with a narrative arc.
 
-## Source Article
-Title: ${article.title}
-Source: ${article.source}
-Date: ${article.date}
-Summary: ${article.summary}
-Key Data: ${article.keyData}
-URL: ${article.url}
+${contextSection}${multiPostNote}
 
 ## Case Study Format Structure
 1. HOOK (1-2 lines): Lead with the most impressive metric or outcome
@@ -25,8 +43,10 @@ URL: ${article.url}
 5. LESSON (2-3 lines): "Here's what most people miss..." — the non-obvious takeaway
 6. CTA: Question or Affitor mention
 
+## Length
+${lengthGuide[length]}
+
 ## Constraints
-- Total length: 800-1500 characters
 - Focus on ONE company/entity — depth over breadth
 - Problem → Action → Result → Lesson arc
 - Use specific numbers throughout

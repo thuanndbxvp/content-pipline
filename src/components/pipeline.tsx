@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import type { ResearchArticle, ContentFormat, GeneratedPost } from "@/lib/types";
+import type { ResearchArticle, ContentFormat, GeneratedPost, PostLength } from "@/lib/types";
+import { POST_LENGTHS } from "@/lib/types";
 
 const STEPS = ["Research", "Select", "Format", "Write"] as const;
 const FORMATS: { value: ContentFormat; label: string; icon: string; desc: string }[] = [
@@ -15,6 +16,8 @@ export default function Pipeline() {
   const [topic, setTopic] = useState("");
   const [articles, setArticles] = useState<ResearchArticle[]>([]);
   const [format, setFormat] = useState<ContentFormat>("toplist");
+  const [postLength, setPostLength] = useState<PostLength>("medium");
+  const [outputCount, setOutputCount] = useState(1);
   const [posts, setPosts] = useState<GeneratedPost[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +57,7 @@ export default function Pipeline() {
   const clearAll = () => setArticles((prev) => prev.map((a) => ({ ...a, selected: false })));
 
   // Step 4: Write posts (streaming)
+  // Each post uses a different primary article but ALL selected articles as context
   const handleWrite = useCallback(async () => {
     const selected = articles.filter((a) => a.selected);
     if (selected.length === 0) return;
@@ -62,9 +66,12 @@ export default function Pipeline() {
     setError(null);
     setPosts([]);
 
-    for (let i = 0; i < selected.length; i++) {
+    const count = Math.min(outputCount, selected.length);
+
+    for (let i = 0; i < count; i++) {
       setWritingIndex(i);
-      const article = selected[i];
+      // Each post gets a different primary article, but all selected as context
+      const primaryArticle = selected[i];
       const postId = `post-${Date.now()}-${i}`;
 
       // Add empty post
@@ -72,7 +79,7 @@ export default function Pipeline() {
         ...prev,
         {
           id: postId,
-          articleId: article.id,
+          articleId: primaryArticle.id,
           format,
           content: "",
           createdAt: new Date().toISOString(),
@@ -83,7 +90,14 @@ export default function Pipeline() {
         const res = await fetch("/api/write", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ article, format }),
+          body: JSON.stringify({
+            article: primaryArticle,
+            format,
+            length: postLength,
+            allArticles: selected,
+            postIndex: i,
+            totalPosts: count,
+          }),
         });
 
         if (!res.ok) {
@@ -129,7 +143,7 @@ export default function Pipeline() {
     }
     setWritingIndex(-1);
     setLoading(false);
-  }, [articles, format]);
+  }, [articles, format, postLength, outputCount]);
 
   // Generate image for a post
   const handleGenerateImage = useCallback(
@@ -335,6 +349,11 @@ export default function Pipeline() {
                           <span className="text-blue-400">{article.source}</span>
                           <span>·</span>
                           <span>{article.date}</span>
+                          {article.keyData === "News" && (
+                            <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded font-medium">
+                              NEWS
+                            </span>
+                          )}
                         </div>
                         <p className="text-sm text-slate-400 mt-2">
                           {article.summary}
@@ -387,6 +406,59 @@ export default function Pipeline() {
                   </button>
                 ))}
               </div>
+
+              <div className="grid grid-cols-2 gap-6 mt-6">
+                <div>
+                  <h2 className="text-lg font-semibold mb-4">📏 Post Length</h2>
+                  <div className="space-y-2">
+                    {POST_LENGTHS.map((l) => (
+                      <button
+                        key={l.value}
+                        onClick={() => setPostLength(l.value)}
+                        className={`w-full p-3 rounded-xl border text-left transition-all ${
+                          postLength === l.value
+                            ? "bg-blue-600/20 border-blue-500/40 ring-1 ring-blue-500/30"
+                            : "bg-white/3 border-white/10 hover:border-white/20"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium">{l.label}</span>
+                          <span className="text-sm text-blue-400">{l.words}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h2 className="text-lg font-semibold mb-4">📊 Output Posts</h2>
+                  <p className="text-sm text-slate-400 mb-3">
+                    {selectedArticles.length} articles selected as source material.
+                    How many posts do you want?
+                  </p>
+                  <div className="flex gap-2">
+                    {[1, 2, 3, 5].filter(n => n <= selectedArticles.length).map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => setOutputCount(n)}
+                        className={`flex-1 p-3 rounded-xl border text-center transition-all ${
+                          outputCount === n
+                            ? "bg-blue-600/20 border-blue-500/40 ring-1 ring-blue-500/30"
+                            : "bg-white/3 border-white/10 hover:border-white/20"
+                        }`}
+                      >
+                        <div className="text-xl font-bold">{n}</div>
+                        <div className="text-xs text-slate-400">post{n > 1 ? "s" : ""}</div>
+                      </button>
+                    ))}
+                  </div>
+                  {outputCount > 1 && (
+                    <p className="text-xs text-slate-500 mt-2">
+                      Each post will focus on a different angle using all {selectedArticles.length} articles as context.
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
             <button
               onClick={handleWrite}
@@ -410,7 +482,7 @@ export default function Pipeline() {
             {loading && writingIndex >= 0 && (
               <div className="flex items-center gap-3 text-blue-400">
                 <Spinner />
-                Writing post {writingIndex + 1} of {selectedArticles.length}...
+                Writing post {writingIndex + 1} of {Math.min(outputCount, selectedArticles.length)}...
               </div>
             )}
             {posts.map((post, i) => {
