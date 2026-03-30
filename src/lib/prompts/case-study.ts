@@ -1,56 +1,41 @@
 import { BRAND_CONTEXT } from "../context";
 import type { ResearchArticle, PostLength } from "../types";
-
-const lengthGuide: Record<PostLength, string> = {
-  short: "Total length: 80-150 words (500-800 characters). Quick case snapshot — hook + key result + lesson.",
-  medium: "Total length: 150-250 words (800-1500 characters). Standard case study with full narrative arc.",
-  long: "Total length: 250-400 words (1500-2500 characters). Deep case analysis with context and implications.",
-};
-
-function formatArticle(a: ResearchArticle): string {
-  return `Title: ${a.title}\nSource: ${a.source}\nDate: ${a.date}\nSummary: ${a.summary}\nURL: ${a.url}`;
-}
+import { lengthGuide, buildContextSection, buildMultiPostNote, buildToneSection } from "./shared";
 
 export function caseStudyPrompt(
   article: ResearchArticle,
   length: PostLength = "medium",
   allArticles?: ResearchArticle[],
   postIndex?: number,
-  totalPosts?: number
+  totalPosts?: number,
+  tone: string = "default",
+  customTone?: string
 ): string {
-  const contextSection = allArticles && allArticles.length > 1
-    ? `\n## All Source Articles (use as additional context/data)\n${allArticles.map((a, i) => `${i + 1}. ${formatArticle(a)}`).join("\n\n")}\n\n## Primary Article (focus on this one for the case study)\n${formatArticle(article)}`
-    : `## Source Article\n${formatArticle(article)}`;
-
-  const multiPostNote = totalPosts && totalPosts > 1 && postIndex !== undefined
-    ? `\n\n## Multi-post Note\nThis is post ${postIndex + 1} of ${totalPosts}. Each post should focus on a DIFFERENT company/event. Don't repeat the same case.`
-    : "";
-
   return `${BRAND_CONTEXT}
 
 ## Task
 Write a LinkedIn Case Study post. Deep-dive into ONE specific company/event with a narrative arc.
 
-${contextSection}${multiPostNote}
+${buildContextSection(article, allArticles)}${buildMultiPostNote(postIndex, totalPosts)}
+
+${buildToneSection(tone, customTone)}
 
 ## Case Study Format Structure
 1. HOOK (1-2 lines): Lead with the most impressive metric or outcome
-   Example: "Harvey just raised $200M at $11B valuation."
 2. CONTEXT (2-3 lines): What problem existed. What the market looked like.
-3. WHAT THEY DID (3-5 lines): The specific strategy, decision, or approach
-   - Be specific: names, numbers, partners, timeline
-4. RESULTS (2-3 lines): Concrete outcomes — revenue, valuation, growth metrics
-5. LESSON (2-3 lines): "Here's what most people miss..." — the non-obvious takeaway
+3. WHAT THEY DID (3-5 lines): Specific strategy, names, numbers, partners
+4. RESULTS (2-3 lines): Concrete outcomes, metrics
+5. LESSON (2-3 lines): The non-obvious takeaway
 6. CTA: Question or Affitor mention
 
 ## Length
 ${lengthGuide[length]}
 
 ## Constraints
-- Focus on ONE company/entity — depth over breadth
+- Focus on ONE company/entity, depth over breadth
 - Problem → Action → Result → Lesson arc
 - Use specific numbers throughout
 - Short paragraphs, narrative style
 - Write in English only
-- Include source link`;
+- NEVER use em dashes, markdown bold (**), or source links in the text`;
 }

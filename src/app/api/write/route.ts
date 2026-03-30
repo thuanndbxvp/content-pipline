@@ -7,7 +7,7 @@ import { toplistPrompt } from "@/lib/prompts/toplist";
 import { povPrompt } from "@/lib/prompts/pov";
 import { caseStudyPrompt } from "@/lib/prompts/case-study";
 
-const promptFns: Record<ContentFormat, (a: ResearchArticle, l: PostLength, allArticles?: ResearchArticle[], postIndex?: number, totalPosts?: number) => string> = {
+const promptFns: Record<ContentFormat, (a: ResearchArticle, l: PostLength, allArticles?: ResearchArticle[], postIndex?: number, totalPosts?: number, tone?: string, customTone?: string) => string> = {
   toplist: toplistPrompt,
   pov: povPrompt,
   "case-study": caseStudyPrompt,
@@ -15,13 +15,15 @@ const promptFns: Record<ContentFormat, (a: ResearchArticle, l: PostLength, allAr
 
 export async function POST(req: NextRequest) {
   try {
-    const { article, format, length = "medium", allArticles, postIndex, totalPosts } = (await req.json()) as {
+    const { article, format, length = "medium", allArticles, postIndex, totalPosts, tone = "default", customTone } = (await req.json()) as {
       article: ResearchArticle;
       format: ContentFormat;
       length?: PostLength;
       allArticles?: ResearchArticle[];
       postIndex?: number;
       totalPosts?: number;
+      tone?: string;
+      customTone?: string;
     };
 
     if (!article || !format) {
@@ -47,7 +49,7 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: "user",
-          content: promptFn(article, length, allArticles, postIndex, totalPosts),
+          content: promptFn(article, length, allArticles, postIndex, totalPosts, tone, customTone),
         },
       ],
     });

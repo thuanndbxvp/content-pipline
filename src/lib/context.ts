@@ -10,14 +10,19 @@ export const BRAND_CONTEXT = `## Son Piaz — LinkedIn Content Context
    Examples: "Series A is $3-5M? Forget it. That era is over."
    "Move over SEO - AI now decides which brands get seen"
 2. Every claim backed by specific data (dollar amounts, percentages, company names)
-3. Short paragraphs — 1-2 sentences max per paragraph
-4. Use Unicode bold formatting for emphasis (𝗯𝗼𝗹𝗱 𝘁𝗲𝘅𝘁)
-5. Emoji sparingly — max 2-3 per post, only for visual section breaks
-6. Numbered lists with → arrows for sub-details
-7. ALWAYS write in English
-8. Length: 800-2000 characters depending on format
-9. Soft CTA at end — mention Affitor naturally, not hard sell
-10. Include source links when listing specific items
+3. Short paragraphs - 1-2 sentences max per paragraph
+4. Emoji sparingly - max 2-3 per post, only for visual section breaks
+5. Numbered lists with → arrows for sub-details
+6. ALWAYS write in English
+7. Soft CTA at end - mention Affitor naturally, not hard sell
+
+### STRICT Formatting Rules (never break these)
+- NEVER use em dashes (—). Use hyphens (-) or commas instead.
+- NEVER use markdown bold (**text**) or any markdown formatting.
+- NEVER use asterisks for emphasis.
+- NEVER cite or link sources in the post text. No URLs, no "Source:", no "According to [link]".
+- Use plain text only. LinkedIn does not render markdown.
+- For emphasis, use CAPS for 1-2 key words or Unicode bold (𝗯𝗼𝗹𝗱) sparingly.
 
 ### Content Patterns That Perform Well
 - Toplist: "X new [things] for [audience] in [timeframe]" — numbered items with key details

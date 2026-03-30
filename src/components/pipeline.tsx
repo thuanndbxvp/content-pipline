@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import type { ResearchArticle, ContentFormat, GeneratedPost, PostLength } from "@/lib/types";
-import { POST_LENGTHS } from "@/lib/types";
+import { POST_LENGTHS, TONE_PRESETS } from "@/lib/types";
 
 const STEPS = ["Research", "Select", "Format", "Write"] as const;
 const FORMATS: { value: ContentFormat; label: string; icon: string; desc: string }[] = [
@@ -18,6 +18,8 @@ export default function Pipeline() {
   const [format, setFormat] = useState<ContentFormat>("toplist");
   const [postLength, setPostLength] = useState<PostLength>("medium");
   const [outputCount, setOutputCount] = useState(1);
+  const [tone, setTone] = useState("default");
+  const [customTone, setCustomTone] = useState("");
   const [posts, setPosts] = useState<GeneratedPost[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,6 +99,8 @@ export default function Pipeline() {
             allArticles: selected,
             postIndex: i,
             totalPosts: count,
+            tone,
+            customTone: tone === "custom" ? customTone : undefined,
           }),
         });
 
@@ -143,7 +147,7 @@ export default function Pipeline() {
     }
     setWritingIndex(-1);
     setLoading(false);
-  }, [articles, format, postLength, outputCount]);
+  }, [articles, format, postLength, outputCount, tone, customTone]);
 
   // Generate image for a post
   const handleGenerateImage = useCallback(
@@ -406,6 +410,32 @@ export default function Pipeline() {
                   </button>
                 ))}
               </div>
+
+              <h2 className="text-lg font-semibold mt-6 mb-4">🎤 Tone</h2>
+              <div className="grid grid-cols-3 gap-2">
+                {TONE_PRESETS.map((t) => (
+                  <button
+                    key={t.value}
+                    onClick={() => setTone(t.value)}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      tone === t.value
+                        ? "bg-blue-600/20 border-blue-500/40 ring-1 ring-blue-500/30"
+                        : "bg-white/3 border-white/10 hover:border-white/20"
+                    }`}
+                  >
+                    <div className="font-medium text-sm">{t.label}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">{t.desc}</div>
+                  </button>
+                ))}
+              </div>
+              {tone === "custom" && (
+                <textarea
+                  value={customTone}
+                  onChange={(e) => setCustomTone(e.target.value)}
+                  placeholder="Describe the tone you want. E.g.: 'Write like a VC partner sharing insider knowledge with founders. Casual but authoritative.'"
+                  className="mt-3 w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 text-sm min-h-[80px]"
+                />
+              )}
 
               <div className="grid grid-cols-2 gap-6 mt-6">
                 <div>
