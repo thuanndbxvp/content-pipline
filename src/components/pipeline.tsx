@@ -7,10 +7,10 @@ import { POST_LENGTHS, TONE_PRESETS, RESEARCH_SOURCES } from "@/lib/types";
 
 const STEPS = ["Research", "Select", "Format", "Write"] as const;
 const FORMATS: { value: ContentFormat; label: string; icon: string; desc: string }[] = [
-  { value: "toplist", label: "Toplist", icon: "📋", desc: "Numbered list of items with data" },
+  { value: "toplist", label: "Toplist", icon: "📋", desc: "Numbered list with data" },
   { value: "pov", label: "POV", icon: "💡", desc: "Bold opinion backed by data" },
-  { value: "case-study", label: "Case Study", icon: "🏢", desc: "Deep-dive into one company" },
-  { value: "how-to", label: "How-to", icon: "🛠️", desc: "Step-by-step actionable guide" },
+  { value: "case-study", label: "Case Study", icon: "🏢", desc: "Deep-dive one company" },
+  { value: "how-to", label: "How-to", icon: "🛠️", desc: "Step-by-step guide" },
 ];
 
 export default function Pipeline() {
@@ -32,7 +32,6 @@ export default function Pipeline() {
 
   const selectedArticles = articles.filter((a) => a.selected);
 
-  // Step 1: Research
   const handleResearch = useCallback(async () => {
     if (!topic.trim()) return;
     setLoading(true);
@@ -56,14 +55,11 @@ export default function Pipeline() {
   }, [topic, researchSource]);
 
   const toggleArticle = (id: string) => {
-    setArticles((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, selected: !a.selected } : a))
-    );
+    setArticles((prev) => prev.map((a) => (a.id === id ? { ...a, selected: !a.selected } : a)));
   };
   const selectAll = () => setArticles((prev) => prev.map((a) => ({ ...a, selected: true })));
   const clearAll = () => setArticles((prev) => prev.map((a) => ({ ...a, selected: false })));
 
-  // Step 4: Write posts (streaming)
   const handleWrite = useCallback(async () => {
     const selected = articles.filter((a) => a.selected);
     if (selected.length === 0) return;
@@ -71,39 +67,29 @@ export default function Pipeline() {
     setLoading(true);
     setError(null);
     setPosts([]);
-
     const count = Math.min(outputCount, selected.length);
 
     for (let i = 0; i < count; i++) {
       setWritingIndex(i);
       const primaryArticle = selected[i];
       const postId = `post-${Date.now()}-${i}`;
-
-      setPosts((prev) => [
-        ...prev,
-        { id: postId, articleId: primaryArticle.id, format, content: "", createdAt: new Date().toISOString() },
-      ]);
+      setPosts((prev) => [...prev, { id: postId, articleId: primaryArticle.id, format, content: "", createdAt: new Date().toISOString() }]);
 
       try {
         const res = await fetch("/api/write", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            article: primaryArticle, format, length: postLength,
-            allArticles: selected, postIndex: i, totalPosts: count,
-            tone, customTone: tone === "custom" ? customTone : undefined, language,
+            article: primaryArticle, format, length: postLength, allArticles: selected,
+            postIndex: i, totalPosts: count, tone,
+            customTone: tone === "custom" ? customTone : undefined, language,
           }),
         });
-
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || "Write failed");
-        }
+        if (!res.ok) { const errData = await res.json(); throw new Error(errData.error || "Write failed"); }
 
         const reader = res.body?.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
-
         if (reader) {
           let done = false;
           while (!done) {
@@ -115,31 +101,17 @@ export default function Pipeline() {
               buffer = lines.pop() || "";
               for (const line of lines) {
                 if (line.startsWith("data: ") && line !== "data: [DONE]") {
-                  try {
-                    const parsed = JSON.parse(line.slice(6));
-                    if (parsed.text) {
-                      setPosts((prev) =>
-                        prev.map((p) => p.id === postId ? { ...p, content: p.content + parsed.text } : p)
-                      );
-                    }
-                  } catch { /* skip malformed */ }
+                  try { const p = JSON.parse(line.slice(6)); if (p.text) setPosts((prev) => prev.map((po) => po.id === postId ? { ...po, content: po.content + p.text } : po)); } catch { /* skip */ }
                 }
               }
             }
           }
           if (buffer.startsWith("data: ") && buffer !== "data: [DONE]") {
-            try {
-              const parsed = JSON.parse(buffer.slice(6));
-              if (parsed.text) {
-                setPosts((prev) => prev.map((p) => p.id === postId ? { ...p, content: p.content + parsed.text } : p));
-              }
-            } catch { /* skip */ }
+            try { const p = JSON.parse(buffer.slice(6)); if (p.text) setPosts((prev) => prev.map((po) => po.id === postId ? { ...po, content: po.content + p.text } : po)); } catch { /* skip */ }
           }
         }
       } catch (err) {
-        setPosts((prev) =>
-          prev.map((p) => p.id === postId && !p.content ? { ...p, content: "[Error: failed to generate]" } : p)
-        );
+        setPosts((prev) => prev.map((p) => p.id === postId && !p.content ? { ...p, content: "[Error: failed to generate]" } : p));
         setError(err instanceof Error ? err.message : "Write failed");
         break;
       }
@@ -148,180 +120,162 @@ export default function Pipeline() {
     setLoading(false);
   }, [articles, format, postLength, outputCount, tone, customTone, language]);
 
-  const handleGenerateImage = useCallback(
-    async (postId: string) => {
-      const post = posts.find((p) => p.id === postId);
-      if (!post || !post.content) return;
-      setImageLoadingIds((prev) => new Set(prev).add(postId));
-      try {
-        const dataRes = await fetch("/api/image", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            postContent: post.content,
-            title: articles.find((a) => a.id === post.articleId)?.title || "",
-            format: post.format,
-          }),
-        });
-        const dataJson = await dataRes.json();
-        if (!dataRes.ok) throw new Error(dataJson.error);
-        const ogRes = await fetch("/api/og", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ infographic: dataJson.infographic }),
-        });
-        if (!ogRes.ok) throw new Error("Image render failed");
-        const blob = await ogRes.blob();
-        const imageUrl = URL.createObjectURL(blob);
-        setPosts((prev) =>
-          prev.map((p) => p.id === postId ? { ...p, imageUrl, imageHtml: JSON.stringify(dataJson.infographic) } : p)
-        );
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Image generation failed");
-      } finally {
-        setImageLoadingIds((prev) => { const next = new Set(prev); next.delete(postId); return next; });
-      }
-    },
-    [posts, articles]
-  );
+  const handleGenerateImage = useCallback(async (postId: string) => {
+    const post = posts.find((p) => p.id === postId);
+    if (!post || !post.content) return;
+    setImageLoadingIds((prev) => new Set(prev).add(postId));
+    try {
+      const dataRes = await fetch("/api/image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ postContent: post.content, title: articles.find((a) => a.id === post.articleId)?.title || "", format: post.format }) });
+      const dataJson = await dataRes.json();
+      if (!dataRes.ok) throw new Error(dataJson.error);
+      const ogRes = await fetch("/api/og", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ infographic: dataJson.infographic }) });
+      if (!ogRes.ok) throw new Error("Image render failed");
+      const blob = await ogRes.blob();
+      const imageUrl = URL.createObjectURL(blob);
+      setPosts((prev) => prev.map((p) => p.id === postId ? { ...p, imageUrl, imageHtml: JSON.stringify(dataJson.infographic) } : p));
+    } catch (err) { setError(err instanceof Error ? err.message : "Image generation failed"); }
+    finally { setImageLoadingIds((prev) => { const next = new Set(prev); next.delete(postId); return next; }); }
+  }, [posts, articles]);
 
   const copyPost = (content: string) => { navigator.clipboard.writeText(content); };
-
   const downloadImage = (imageUrl: string, postId: string) => {
-    const a = document.createElement("a");
-    a.href = imageUrl;
-    a.download = `affitor-${postId}.png`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(imageUrl);
+    const a = document.createElement("a"); a.href = imageUrl; a.download = `affitor-${postId}.png`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(imageUrl);
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0e1a] text-white">
-      <header className="border-b border-white/10 px-6 py-5">
-        <div className="max-w-4xl mx-auto flex items-center gap-3">
-          <Image src="/affitor-logo.svg" alt="Affitor" width={32} height={32} />
-          <div>
-            <h1 className="text-2xl font-bold">
-              Affitor <span className="text-blue-400">Content Pipeline</span>
-            </h1>
-            <p className="text-slate-500 text-sm">
-              Research → Select → Format → Write
-            </p>
+    <div className="min-h-screen" style={{ background: "var(--bg-secondary)" }}>
+      {/* Header */}
+      <header className="bg-white border-b" style={{ borderColor: "var(--border-primary)", height: 64 }}>
+        <div className="max-w-5xl mx-auto px-6 h-full flex items-center gap-3">
+          <Image src="/affitor-logo.svg" alt="Affitor" width={20} height={20} />
+          <div className="flex items-baseline gap-2">
+            <h1 className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>Affitor</h1>
+            <span className="text-base font-semibold" style={{ color: "var(--primary)" }}>Content Pipeline</span>
           </div>
         </div>
       </header>
 
-      <div className="max-w-4xl mx-auto px-6 py-6">
-        {/* Step Indicator */}
-        <div className="flex items-center gap-2 mb-8">
+      <div className="max-w-5xl mx-auto px-6 py-6">
+        {/* Steps */}
+        <div className="flex items-center gap-2 mb-6">
           {STEPS.map((s, i) => (
             <div key={s} className="flex items-center gap-2">
               <button
                 onClick={() => i < step && !loading && setStep(i)}
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
-                  i === step ? "bg-blue-600 text-white"
-                    : i < step && !loading ? "bg-blue-600/20 text-blue-400 cursor-pointer hover:bg-blue-600/30"
-                    : "bg-white/5 text-slate-500"
-                }`}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all"
+                style={{
+                  background: i === step ? "var(--primary)" : i < step && !loading ? "var(--bg-brand)" : "var(--bg-tertiary)",
+                  color: i === step ? "var(--text-inverse)" : i < step ? "var(--text-brand)" : "var(--text-tertiary)",
+                  cursor: i < step && !loading ? "pointer" : "default",
+                }}
               >
-                {i + 1} {s}
+                <span className="w-5 h-5 rounded-full flex items-center justify-center text-xs" style={{
+                  background: i === step ? "rgba(255,255,255,0.2)" : "transparent",
+                }}>{i + 1}</span>
+                {s}
               </button>
-              {i < STEPS.length - 1 && <span className="text-slate-600">→</span>}
+              {i < STEPS.length - 1 && <span style={{ color: "var(--text-tertiary)" }}>→</span>}
             </div>
           ))}
         </div>
 
+        {/* Error */}
         {error && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400">
-            ✕ {error}
-            <button onClick={() => setError(null)} className="ml-3 text-red-300 hover:text-white">dismiss</button>
+          <div className="mb-4 px-4 py-3 rounded-lg text-sm flex items-center justify-between" style={{ background: "var(--error-bg)", color: "var(--error-text)", border: "1px solid #FECACA" }}>
+            <span>{error}</span>
+            <button onClick={() => setError(null)} className="ml-3 font-medium hover:underline">Dismiss</button>
           </div>
         )}
 
         {/* Step 1: Research */}
         {step === 0 && (
-          <section className="space-y-4">
-            <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
-              <h2 className="text-lg font-semibold mb-4">📝 Topic</h2>
-              <input
-                type="text"
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleResearch()}
-                placeholder='e.g. "AI startups funding rounds March 2026"'
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50"
-              />
-
-              <h3 className="text-sm font-medium text-slate-400 mt-4 mb-2">Source Filter</h3>
-              <div className="flex gap-2 flex-wrap">
+          <div className="bg-white rounded-lg border p-5" style={{ borderColor: "var(--border-primary)" }}>
+            <label className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Topic</label>
+            <input
+              type="text"
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleResearch()}
+              placeholder='e.g. "AI startups funding rounds March 2026"'
+              className="mt-2 w-full rounded-lg px-3 py-2 text-sm outline-none transition-all"
+              style={{ border: "1px solid var(--border-secondary)", color: "var(--text-primary)" }}
+              onFocus={(e) => e.target.style.borderColor = "var(--border-focus)"}
+              onBlur={(e) => e.target.style.borderColor = "var(--border-secondary)"}
+            />
+            <div className="mt-3">
+              <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Source</span>
+              <div className="flex gap-1.5 mt-1.5 flex-wrap">
                 {RESEARCH_SOURCES.map((s) => (
                   <button
                     key={s.value}
                     onClick={() => setResearchSource(s.value)}
-                    className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
-                      researchSource === s.value
-                        ? "bg-blue-600/20 border border-blue-500/40 text-blue-400"
-                        : "bg-white/5 border border-white/10 text-slate-400 hover:border-white/20"
-                    }`}
+                    className="px-2.5 py-1 rounded-md text-xs font-medium transition-all"
+                    style={{
+                      background: researchSource === s.value ? "var(--bg-brand)" : "var(--bg-secondary)",
+                      color: researchSource === s.value ? "var(--text-brand)" : "var(--text-secondary)",
+                      border: `1px solid ${researchSource === s.value ? "var(--primary)" : "var(--border-primary)"}`,
+                    }}
                   >
                     {s.icon} {s.label}
                   </button>
                 ))}
               </div>
-
-              <button
-                onClick={handleResearch}
-                disabled={loading || !topic.trim()}
-                className="mt-4 px-6 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 rounded-xl font-medium transition-colors"
-              >
-                {loading ? <span className="flex items-center gap-2"><Spinner /> Researching...</span> : "🔍 Research"}
-              </button>
             </div>
-          </section>
+            <button
+              onClick={handleResearch}
+              disabled={loading || !topic.trim()}
+              className="mt-4 px-4 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-40"
+              style={{ background: "var(--primary)", color: "var(--text-inverse)" }}
+              onMouseEnter={(e) => !loading && (e.currentTarget.style.background = "var(--primary-hover)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "var(--primary)")}
+            >
+              {loading ? <span className="flex items-center gap-2"><Spinner />Researching...</span> : "Research"}
+            </button>
+          </div>
         )}
 
-        {/* Step 2: Select Articles */}
+        {/* Step 2: Select */}
         {step === 1 && (
-          <section className="space-y-4">
-            <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold">📄 Articles Found</h2>
-                <span className="text-slate-400 text-sm">{selectedArticles.length} selected</span>
+          <div>
+            <div className="bg-white rounded-lg border p-5" style={{ borderColor: "var(--border-primary)" }}>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Articles Found</span>
+                <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>{selectedArticles.length} selected</span>
               </div>
-              <div className="flex gap-3 mb-4">
-                <button onClick={selectAll} className="text-sm text-blue-400 hover:text-blue-300">Select all</button>
-                <button onClick={clearAll} className="text-sm text-slate-400 hover:text-slate-300">Clear</button>
+              <div className="flex gap-3 mb-3">
+                <button onClick={selectAll} className="text-xs font-medium" style={{ color: "var(--text-brand)" }}>Select all</button>
+                <button onClick={clearAll} className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Clear</button>
               </div>
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {articles.map((article) => (
                   <div
                     key={article.id}
                     onClick={() => toggleArticle(article.id)}
-                    className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                      article.selected ? "bg-blue-600/10 border-blue-500/30" : "bg-white/3 border-white/10 hover:border-white/20"
-                    }`}
+                    className="p-3 rounded-lg border cursor-pointer transition-all"
+                    style={{
+                      borderColor: article.selected ? "var(--primary)" : "var(--border-primary)",
+                      background: article.selected ? "var(--bg-brand)" : "var(--bg-primary)",
+                    }}
                   >
-                    <div className="flex items-start gap-3">
-                      <div className={`w-5 h-5 mt-0.5 rounded flex items-center justify-center text-xs flex-shrink-0 ${
-                        article.selected ? "bg-blue-600 text-white" : "bg-white/10 text-transparent"
-                      }`}>✓</div>
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-4 h-4 mt-0.5 rounded flex items-center justify-center text-xs flex-shrink-0" style={{
+                        background: article.selected ? "var(--primary)" : "var(--bg-tertiary)",
+                        color: article.selected ? "white" : "transparent",
+                      }}>✓</div>
                       <div className="flex-1 min-w-0">
-                        <h3 className="font-medium text-white">{article.title}</h3>
-                        <div className="flex items-center gap-2 mt-1 text-sm text-slate-400 flex-wrap">
-                          <span className="text-blue-400">{article.source}</span>
-                          <span>·</span>
-                          <span>{article.date}</span>
+                        <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{article.title}</p>
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                          <span className="text-xs font-medium" style={{ color: "var(--text-brand)" }}>{article.source}</span>
+                          <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>{article.date}</span>
                           {article.keyData === "News" && (
-                            <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded font-medium">NEWS</span>
+                            <span className="px-1.5 py-0.5 rounded text-[11px] font-medium" style={{ background: "var(--warning-bg)", color: "var(--warning-text)" }}>NEWS</span>
                           )}
                           {article.tag && (
-                            <span className="px-1.5 py-0.5 bg-blue-500/15 text-blue-300 text-xs rounded font-medium">{article.tag}</span>
+                            <span className="px-1.5 py-0.5 rounded text-[11px] font-medium" style={{ background: "var(--info-bg)", color: "var(--info-text)" }}>{article.tag}</span>
                           )}
                         </div>
-                        <p className="text-sm text-slate-400 mt-2">{article.summary}</p>
-                        <p className="text-xs text-slate-500 mt-1 truncate">{article.url}</p>
+                        <p className="text-xs mt-1.5 line-clamp-2" style={{ color: "var(--text-secondary)" }}>{article.summary}</p>
                       </div>
                     </div>
                   </div>
@@ -331,119 +285,127 @@ export default function Pipeline() {
             {selectedArticles.length > 0 && (
               <button
                 onClick={() => { setOutputCount((prev) => Math.min(prev, selectedArticles.length)); setStep(2); }}
-                className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-medium transition-colors"
+                className="mt-4 px-4 py-2 rounded-lg text-sm font-medium"
+                style={{ background: "var(--primary)", color: "var(--text-inverse)" }}
               >
                 Continue with {selectedArticles.length} article{selectedArticles.length > 1 ? "s" : ""} →
               </button>
             )}
-          </section>
+          </div>
         )}
 
         {/* Step 3: Format */}
         {step === 2 && (
-          <section className="space-y-4">
-            <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
-              {/* Language Toggle */}
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-lg font-semibold">🎯 Content Format</h2>
-                <div className="flex bg-white/5 rounded-lg p-0.5 border border-white/10">
-                  <button
-                    onClick={() => setLanguage("en")}
-                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                      language === "en" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
-                    }`}
-                  >
-                    🇺🇸 English
-                  </button>
-                  <button
-                    onClick={() => setLanguage("vn")}
-                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                      language === "vn" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
-                    }`}
-                  >
-                    🇻🇳 Tiếng Việt
-                  </button>
+          <div>
+            <div className="bg-white rounded-lg border p-5 space-y-5" style={{ borderColor: "var(--border-primary)" }}>
+              {/* Language */}
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Content Format</span>
+                <div className="flex rounded-lg overflow-hidden" style={{ border: "1px solid var(--border-secondary)" }}>
+                  {(["en", "vn"] as const).map((l) => (
+                    <button
+                      key={l}
+                      onClick={() => setLanguage(l)}
+                      className="px-3 py-1.5 text-xs font-medium transition-all"
+                      style={{
+                        background: language === l ? "var(--primary)" : "var(--bg-primary)",
+                        color: language === l ? "white" : "var(--text-secondary)",
+                      }}
+                    >
+                      {l === "en" ? "🇺🇸 English" : "🇻🇳 Tiếng Việt"}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              <div className="grid grid-cols-4 gap-3">
+              {/* Formats */}
+              <div className="grid grid-cols-4 gap-2">
                 {FORMATS.map((f) => (
                   <button
                     key={f.value}
                     onClick={() => setFormat(f.value)}
-                    className={`p-4 rounded-xl border text-left transition-all ${
-                      format === f.value
-                        ? "bg-blue-600/20 border-blue-500/40 ring-1 ring-blue-500/30"
-                        : "bg-white/3 border-white/10 hover:border-white/20"
-                    }`}
+                    className="p-3 rounded-lg border text-left transition-all"
+                    style={{
+                      borderColor: format === f.value ? "var(--primary)" : "var(--border-primary)",
+                      background: format === f.value ? "var(--bg-brand)" : "var(--bg-primary)",
+                    }}
                   >
-                    <div className="text-2xl mb-2">{f.icon}</div>
-                    <div className="font-medium text-sm">{f.label}</div>
-                    <div className="text-xs text-slate-400 mt-1">{f.desc}</div>
+                    <div className="text-lg mb-1">{f.icon}</div>
+                    <div className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{f.label}</div>
+                    <div className="text-xs mt-0.5" style={{ color: "var(--text-tertiary)" }}>{f.desc}</div>
                   </button>
                 ))}
               </div>
 
-              <h2 className="text-lg font-semibold mt-6 mb-4">🎤 Tone</h2>
-              <div className="grid grid-cols-3 gap-2">
-                {TONE_PRESETS.map((t) => (
-                  <button
-                    key={t.value}
-                    onClick={() => setTone(t.value)}
-                    className={`p-3 rounded-xl border text-left transition-all ${
-                      tone === t.value ? "bg-blue-600/20 border-blue-500/40 ring-1 ring-blue-500/30" : "bg-white/3 border-white/10 hover:border-white/20"
-                    }`}
-                  >
-                    <div className="font-medium text-sm">{t.label}</div>
-                    <div className="text-xs text-slate-400 mt-0.5">{t.desc}</div>
-                  </button>
-                ))}
+              {/* Tone */}
+              <div>
+                <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Tone</span>
+                <div className="grid grid-cols-3 gap-2 mt-2">
+                  {TONE_PRESETS.map((t) => (
+                    <button
+                      key={t.value}
+                      onClick={() => setTone(t.value)}
+                      className="p-2.5 rounded-lg border text-left transition-all"
+                      style={{
+                        borderColor: tone === t.value ? "var(--primary)" : "var(--border-primary)",
+                        background: tone === t.value ? "var(--bg-brand)" : "var(--bg-primary)",
+                      }}
+                    >
+                      <div className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>{t.label}</div>
+                      <div className="text-[11px] mt-0.5" style={{ color: "var(--text-tertiary)" }}>{t.desc}</div>
+                    </button>
+                  ))}
+                </div>
+                {tone === "custom" && (
+                  <textarea
+                    value={customTone}
+                    onChange={(e) => setCustomTone(e.target.value)}
+                    placeholder="Describe your tone..."
+                    className="mt-2 w-full rounded-lg px-3 py-2 text-sm outline-none min-h-[72px]"
+                    style={{ border: "1px solid var(--border-secondary)", color: "var(--text-primary)" }}
+                  />
+                )}
               </div>
-              {tone === "custom" && (
-                <textarea
-                  value={customTone}
-                  onChange={(e) => setCustomTone(e.target.value)}
-                  placeholder="Describe the tone you want..."
-                  className="mt-3 w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500/50 text-sm min-h-[80px]"
-                />
-              )}
 
-              <div className="grid grid-cols-2 gap-6 mt-6">
+              {/* Length + Output */}
+              <div className="grid grid-cols-2 gap-5">
                 <div>
-                  <h2 className="text-lg font-semibold mb-4">📏 Post Length</h2>
-                  <div className="space-y-2">
+                  <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Length</span>
+                  <div className="space-y-1.5 mt-2">
                     {POST_LENGTHS.map((l) => (
                       <button
                         key={l.value}
                         onClick={() => setPostLength(l.value)}
-                        className={`w-full p-3 rounded-xl border text-left transition-all ${
-                          postLength === l.value ? "bg-blue-600/20 border-blue-500/40 ring-1 ring-blue-500/30" : "bg-white/3 border-white/10 hover:border-white/20"
-                        }`}
+                        className="w-full p-2.5 rounded-lg border text-left transition-all flex justify-between items-center"
+                        style={{
+                          borderColor: postLength === l.value ? "var(--primary)" : "var(--border-primary)",
+                          background: postLength === l.value ? "var(--bg-brand)" : "var(--bg-primary)",
+                        }}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium">{l.label}</span>
-                          <span className="text-sm text-blue-400">{l.words}</span>
-                        </div>
+                        <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{l.label}</span>
+                        <span className="text-xs" style={{ color: "var(--text-brand)" }}>{l.words}</span>
                       </button>
                     ))}
                   </div>
                 </div>
                 <div>
-                  <h2 className="text-lg font-semibold mb-4">📊 Output Posts</h2>
-                  <p className="text-sm text-slate-400 mb-3">
-                    {selectedArticles.length} sources. How many posts?
+                  <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Output Posts</span>
+                  <p className="text-xs mt-1 mb-2" style={{ color: "var(--text-secondary)" }}>
+                    {selectedArticles.length} sources selected
                   </p>
                   <div className="flex gap-2">
                     {[1, 2, 3, 5].filter(n => n <= selectedArticles.length).map((n) => (
                       <button
                         key={n}
                         onClick={() => setOutputCount(n)}
-                        className={`flex-1 p-3 rounded-xl border text-center transition-all ${
-                          outputCount === n ? "bg-blue-600/20 border-blue-500/40 ring-1 ring-blue-500/30" : "bg-white/3 border-white/10 hover:border-white/20"
-                        }`}
+                        className="flex-1 py-3 rounded-lg border text-center transition-all"
+                        style={{
+                          borderColor: outputCount === n ? "var(--primary)" : "var(--border-primary)",
+                          background: outputCount === n ? "var(--bg-brand)" : "var(--bg-primary)",
+                        }}
                       >
-                        <div className="text-xl font-bold">{n}</div>
-                        <div className="text-xs text-slate-400">post{n > 1 ? "s" : ""}</div>
+                        <div className="text-lg font-bold" style={{ color: "var(--text-primary)" }}>{n}</div>
+                        <div className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>post{n > 1 ? "s" : ""}</div>
                       </button>
                     ))}
                   </div>
@@ -453,20 +415,20 @@ export default function Pipeline() {
             <button
               onClick={handleWrite}
               disabled={loading}
-              className="px-6 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 rounded-xl font-medium transition-colors"
+              className="mt-4 px-5 py-2.5 rounded-lg text-sm font-medium transition-all disabled:opacity-40"
+              style={{ background: "var(--primary)", color: "var(--text-inverse)" }}
             >
-              {loading ? <span className="flex items-center gap-2"><Spinner /> Writing...</span> : "✍️ Write with Claude"}
+              {loading ? <span className="flex items-center gap-2"><Spinner />Writing...</span> : "Write with Claude"}
             </button>
-          </section>
+          </div>
         )}
 
-        {/* Step 4: Posts Output */}
+        {/* Step 4: Output */}
         {step === 3 && (
-          <section className="space-y-6">
+          <div className="space-y-4">
             {loading && writingIndex >= 0 && (
-              <div className="flex items-center gap-3 text-blue-400">
-                <Spinner />
-                Writing post {writingIndex + 1} of {Math.min(outputCount, selectedArticles.length)}...
+              <div className="flex items-center gap-2 text-sm" style={{ color: "var(--text-brand)" }}>
+                <Spinner /> Writing post {writingIndex + 1} of {Math.min(outputCount, selectedArticles.length)}...
               </div>
             )}
             {posts.map((post, i) => {
@@ -474,45 +436,48 @@ export default function Pipeline() {
               const isImageLoading = imageLoadingIds.has(post.id);
               const hasContent = post.content && !post.content.startsWith("[Error:");
               return (
-                <div key={post.id} className="bg-white/5 rounded-2xl p-6 border border-white/10">
+                <div key={post.id} className="bg-white rounded-lg border p-5" style={{ borderColor: "var(--border-primary)" }}>
                   <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <span className="text-sm text-blue-400 font-medium">Post {i + 1}</span>
-                      {article && <span className="text-sm text-slate-500 ml-2">from: {article.title}</span>}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium px-2 py-0.5 rounded" style={{ background: "var(--bg-brand)", color: "var(--text-brand)" }}>Post {i + 1}</span>
+                      {article && <span className="text-xs truncate max-w-[300px]" style={{ color: "var(--text-tertiary)" }}>{article.title}</span>}
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-1.5">
                       <button
                         onClick={() => copyPost(post.content)}
                         disabled={!hasContent}
-                        className="px-3 py-1.5 text-sm bg-white/5 hover:bg-white/10 disabled:opacity-30 rounded-lg transition-colors"
+                        className="px-2.5 py-1 rounded-md text-xs font-medium transition-all disabled:opacity-30"
+                        style={{ border: "1px solid var(--border-secondary)", color: "var(--text-secondary)" }}
                       >
-                        📋 Copy
+                        Copy
                       </button>
                       {!post.imageUrl && !isImageLoading && (
                         <button
                           onClick={() => handleGenerateImage(post.id)}
                           disabled={loading || !hasContent}
-                          className="px-3 py-1.5 text-sm bg-blue-600/20 hover:bg-blue-600/30 disabled:opacity-30 text-blue-400 rounded-lg transition-colors"
+                          className="px-2.5 py-1 rounded-md text-xs font-medium transition-all disabled:opacity-30"
+                          style={{ background: "var(--bg-brand)", color: "var(--text-brand)", border: "1px solid var(--primary)" }}
                         >
-                          🖼️ Generate Image
+                          Generate Image
                         </button>
                       )}
                     </div>
                   </div>
-                  <div className="whitespace-pre-wrap text-slate-200 text-sm leading-relaxed bg-white/3 rounded-xl p-4 max-h-[500px] overflow-y-auto">
-                    {post.content || <span className="text-slate-500 flex items-center gap-2"><Spinner /> Generating...</span>}
+                  <div className="whitespace-pre-wrap text-sm leading-relaxed rounded-lg p-4" style={{ background: "var(--bg-secondary)", color: "var(--text-primary)" }}>
+                    {post.content || <span className="flex items-center gap-2" style={{ color: "var(--text-tertiary)" }}><Spinner /> Generating...</span>}
                   </div>
                   {isImageLoading && (
-                    <div className="mt-4 flex items-center gap-2 text-blue-400 text-sm"><Spinner /> Generating infographic...</div>
+                    <div className="mt-3 flex items-center gap-2 text-xs" style={{ color: "var(--text-brand)" }}><Spinner /> Generating infographic...</div>
                   )}
                   {post.imageUrl && (
-                    <div className="mt-4">
-                      <img src={post.imageUrl} alt="Infographic" className="rounded-xl max-w-[400px] border border-white/10" />
+                    <div className="mt-3">
+                      <img src={post.imageUrl} alt="Infographic" className="rounded-lg max-w-[360px]" style={{ border: "1px solid var(--border-primary)" }} />
                       <button
                         onClick={() => downloadImage(post.imageUrl!, post.id)}
-                        className="mt-2 px-3 py-1.5 text-sm bg-green-600/20 hover:bg-green-600/30 text-green-400 rounded-lg transition-colors"
+                        className="mt-2 px-2.5 py-1 rounded-md text-xs font-medium"
+                        style={{ background: "var(--success-bg)", color: "var(--success-text)", border: "1px solid #A7F3D0" }}
                       >
-                        ⬇️ Download PNG
+                        Download PNG
                       </button>
                     </div>
                   )}
@@ -522,12 +487,13 @@ export default function Pipeline() {
             {!loading && posts.length > 0 && (
               <button
                 onClick={() => { setStep(0); setPosts([]); setArticles([]); setTopic(""); setOutputCount(1); }}
-                className="px-6 py-3 bg-white/5 hover:bg-white/10 rounded-xl font-medium transition-colors"
+                className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+                style={{ border: "1px solid var(--border-secondary)", color: "var(--text-secondary)" }}
               >
                 ↻ Start New Pipeline
               </button>
             )}
-          </section>
+          </div>
         )}
       </div>
     </div>
@@ -536,7 +502,7 @@ export default function Pipeline() {
 
 function Spinner() {
   return (
-    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+    <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
     </svg>
