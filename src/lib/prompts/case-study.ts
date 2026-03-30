@@ -1,6 +1,6 @@
 import { BRAND_CONTEXT } from "../context";
-import type { ResearchArticle, PostLength } from "../types";
-import { lengthGuide, buildContextSection, buildMultiPostNote, buildToneSection } from "./shared";
+import type { ResearchArticle, PostLength, ContentLanguage } from "../types";
+import { lengthGuide, buildContextSection, buildMultiPostNote, buildToneSection, buildLanguageSection } from "./shared";
 
 export function caseStudyPrompt(
   article: ResearchArticle,
@@ -9,7 +9,8 @@ export function caseStudyPrompt(
   postIndex?: number,
   totalPosts?: number,
   tone: string = "default",
-  customTone?: string
+  customTone?: string,
+  language: ContentLanguage = "en"
 ): string {
   return `${BRAND_CONTEXT}
 
@@ -19,6 +20,8 @@ Write a LinkedIn Case Study post. Deep-dive into ONE specific company/event with
 ${buildContextSection(article, allArticles)}${buildMultiPostNote(postIndex, totalPosts)}
 
 ${buildToneSection(tone, customTone)}
+
+${buildLanguageSection(language)}
 
 ## Case Study Format Structure
 1. HOOK (1-2 lines): Lead with the most impressive metric or outcome
@@ -36,6 +39,5 @@ ${lengthGuide[length]}
 - Problem → Action → Result → Lesson arc
 - Use specific numbers throughout
 - Short paragraphs, narrative style
-- Write in English only
 - NEVER use em dashes, markdown bold (**), or source links in the text`;
 }

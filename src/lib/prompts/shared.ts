@@ -1,4 +1,4 @@
-import type { ResearchArticle, PostLength } from "../types";
+import type { ResearchArticle, PostLength, ContentLanguage } from "../types";
 
 export const lengthGuide: Record<PostLength, string> = {
   short: "Total length: 80-150 words. Concise, punchy. Every word earns its place.",
@@ -40,4 +40,18 @@ export function buildToneSection(tone: string, customTone?: string): string {
     return `## Tone\n${customTone}`;
   }
   return `## Tone\n${toneGuide[tone] || toneGuide.default}`;
+}
+
+export function buildLanguageSection(language: ContentLanguage = "en"): string {
+  if (language === "vn") {
+    return `## Language
+Write the ENTIRE post in Vietnamese.
+- Use natural, conversational Vietnamese (not Google Translate style)
+- Keep technical terms in English when commonly used (AI, SaaS, startup, funding, etc.)
+- Vietnamese audience: founders, marketers, tech leaders in Vietnam
+- Adapt cultural context for Vietnamese market
+- Still follow all formatting rules (no em dashes, no markdown bold, no source links)`;
+  }
+  return `## Language
+Write in English only. Target audience: US/global market.`;
 }

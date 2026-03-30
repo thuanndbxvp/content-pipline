@@ -2,20 +2,31 @@ import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 
 export const maxDuration = 60;
-import type { ResearchArticle, ContentFormat, PostLength } from "@/lib/types";
+import type { ResearchArticle, ContentFormat, PostLength, ContentLanguage } from "@/lib/types";
 import { toplistPrompt } from "@/lib/prompts/toplist";
 import { povPrompt } from "@/lib/prompts/pov";
 import { caseStudyPrompt } from "@/lib/prompts/case-study";
+import { howToPrompt } from "@/lib/prompts/how-to";
 
-const promptFns: Record<ContentFormat, (a: ResearchArticle, l: PostLength, allArticles?: ResearchArticle[], postIndex?: number, totalPosts?: number, tone?: string, customTone?: string) => string> = {
+type PromptFn = (
+  a: ResearchArticle, l: PostLength, allArticles?: ResearchArticle[],
+  postIndex?: number, totalPosts?: number, tone?: string, customTone?: string,
+  language?: ContentLanguage
+) => string;
+
+const promptFns: Record<ContentFormat, PromptFn> = {
   toplist: toplistPrompt,
   pov: povPrompt,
   "case-study": caseStudyPrompt,
+  "how-to": howToPrompt,
 };
 
 export async function POST(req: NextRequest) {
   try {
-    const { article, format, length = "medium", allArticles, postIndex, totalPosts, tone = "default", customTone } = (await req.json()) as {
+    const {
+      article, format, length = "medium", allArticles, postIndex, totalPosts,
+      tone = "default", customTone, language = "en"
+    } = (await req.json()) as {
       article: ResearchArticle;
       format: ContentFormat;
       length?: PostLength;
@@ -24,6 +35,7 @@ export async function POST(req: NextRequest) {
       totalPosts?: number;
       tone?: string;
       customTone?: string;
+      language?: ContentLanguage;
     };
 
     if (!article || !format) {
@@ -49,12 +61,11 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: "user",
-          content: promptFn(article, length, allArticles, postIndex, totalPosts, tone, customTone),
+          content: promptFn(article, length, allArticles, postIndex, totalPosts, tone, customTone, language),
         },
       ],
     });
 
-    // Stream the response as SSE
     const encoder = new TextEncoder();
     const readable = new ReadableStream({
       async start(controller) {

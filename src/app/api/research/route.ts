@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { ResearchArticle } from "@/lib/types";
+import type { ResearchArticle, ResearchSource } from "@/lib/types";
+import { TAG_RULES, RESEARCH_SOURCES } from "@/lib/types";
 
 export const maxDuration = 60;
 
@@ -66,7 +67,7 @@ function extractSource(url: string, metaUrl?: { hostname?: string; netloc?: stri
 
 export async function POST(req: NextRequest) {
   try {
-    const { topic } = await req.json();
+    const { topic, source = "all" } = await req.json() as { topic: string; source?: ResearchSource };
 
     if (!topic || typeof topic !== "string") {
       return NextResponse.json(
@@ -89,25 +90,32 @@ export async function POST(req: NextRequest) {
       "X-Subscription-Token": braveApiKey,
     };
 
+    // Build search query with source filter
+    const sourceConfig = RESEARCH_SOURCES.find((s) => s.value === source);
+    const searchQuery = sourceConfig?.query ? `${topic} ${sourceConfig.query}` : topic;
+
     // Run Web Search + News Search in parallel for best coverage
     const [webRes, newsRes] = await Promise.all([
       fetch(
         `https://api.search.brave.com/res/v1/web/search?${new URLSearchParams({
-          q: topic,
+          q: searchQuery,
           count: "20",
           freshness: "pm",
           text_decorations: "false",
         })}`,
         { headers }
       ),
-      fetch(
-        `https://api.search.brave.com/res/v1/news/search?${new URLSearchParams({
-          q: topic,
-          count: "15",
-          freshness: "pw", // past week for news — most recent
-        })}`,
-        { headers }
-      ).catch(() => null), // News search may fail on some plans
+      // Skip news search for site-specific filters
+      source === "all" || source === "news"
+        ? fetch(
+            `https://api.search.brave.com/res/v1/news/search?${new URLSearchParams({
+              q: topic,
+              count: "15",
+              freshness: "pw",
+            })}`,
+            { headers }
+          ).catch(() => null)
+        : Promise.resolve(null),
     ]);
 
     if (!webRes.ok) {
@@ -168,16 +176,23 @@ export async function POST(req: NextRequest) {
       return parseAge(a.age) - parseAge(b.age);
     });
 
-    const articles: ResearchArticle[] = combined.slice(0, 15).map((r, i) => ({
-      id: `article-${i}-${Date.now()}`,
-      title: r.title,
-      source: r.source,
-      url: r.url,
-      date: r.age || "Recent",
-      summary: r.description,
-      keyData: r.isNews ? "News" : "",
-      selected: false,
-    }));
+    const articles: ResearchArticle[] = combined.slice(0, 15).map((r, i) => {
+      // Auto-tag based on title + description
+      const text = `${r.title} ${r.description}`;
+      const matchedTag = TAG_RULES.find((rule) => rule.patterns.test(text));
+
+      return {
+        id: `article-${i}-${Date.now()}`,
+        title: r.title,
+        source: r.source,
+        url: r.url,
+        date: r.age || "Recent",
+        summary: r.description,
+        keyData: r.isNews ? "News" : "",
+        tag: matchedTag?.tag,
+        selected: false,
+      };
+    });
 
     return NextResponse.json({ articles });
   } catch (error) {

@@ -1,7 +1,7 @@
 export const BRAND_CONTEXT = `## Son Piaz — LinkedIn Content Context
 
 ### Who
-- Co-founder & CEO of Affitor — AI-native affiliate marketing platform for SaaS companies
+- Founder & CEO of Affitor — AI-native affiliate marketing platform for SaaS companies
 - Target audience: SaaS founders, growth leaders, VCs, marketing VPs (US/global)
 - Tone: Data-driven, opinionated, accessible. Not academic, not hype.
 

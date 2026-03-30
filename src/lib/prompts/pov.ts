@@ -1,6 +1,6 @@
 import { BRAND_CONTEXT } from "../context";
-import type { ResearchArticle, PostLength } from "../types";
-import { lengthGuide, buildContextSection, buildMultiPostNote, buildToneSection } from "./shared";
+import type { ResearchArticle, PostLength, ContentLanguage } from "../types";
+import { lengthGuide, buildContextSection, buildMultiPostNote, buildToneSection, buildLanguageSection } from "./shared";
 
 export function povPrompt(
   article: ResearchArticle,
@@ -9,7 +9,8 @@ export function povPrompt(
   postIndex?: number,
   totalPosts?: number,
   tone: string = "default",
-  customTone?: string
+  customTone?: string,
+  language: ContentLanguage = "en"
 ): string {
   return `${BRAND_CONTEXT}
 
@@ -19,6 +20,8 @@ Write a LinkedIn POV (Point of View / Hot Take) post. Argue a clear, opinionated
 ${buildContextSection(article, allArticles)}${buildMultiPostNote(postIndex, totalPosts)}
 
 ${buildToneSection(tone, customTone)}
+
+${buildLanguageSection(language)}
 
 ## POV Format Structure
 1. HOOK (1-2 lines): Contrarian or bold opening that challenges conventional wisdom
@@ -35,6 +38,5 @@ ${lengthGuide[length]}
 - Use specific data to support every claim
 - Short paragraphs, 1-2 sentences each
 - No bullet points for POV, this is narrative
-- Write in English only
 - NEVER use em dashes, markdown bold (**), or source links in the text`;
 }
