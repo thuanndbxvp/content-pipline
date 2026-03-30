@@ -94,34 +94,41 @@ export async function POST(req: NextRequest) {
     const sourceConfig = RESEARCH_SOURCES.find((s) => s.value === source);
     const searchQuery = sourceConfig?.query ? `${topic} ${sourceConfig.query}` : topic;
 
-    // Run Web Search + News Search in parallel for best coverage
-    const [webRes, newsRes] = await Promise.all([
-      fetch(
-        `https://api.search.brave.com/res/v1/web/search?${new URLSearchParams({
-          q: searchQuery,
-          count: "20",
-          freshness: "pm",
-          text_decorations: "false",
+    // Web Search first
+    const webRes = await fetch(
+      `https://api.search.brave.com/res/v1/web/search?${new URLSearchParams({
+        q: searchQuery,
+        count: "20",
+        freshness: "pm",
+        text_decorations: "false",
+      })}`,
+      { headers }
+    );
+
+    // News Search second (sequential to avoid Brave Free plan 1 req/s rate limit)
+    let newsRes: Response | null = null;
+    if (source === "all" || source === "news") {
+      await new Promise((r) => setTimeout(r, 1100)); // wait 1.1s for rate limit
+      newsRes = await fetch(
+        `https://api.search.brave.com/res/v1/news/search?${new URLSearchParams({
+          q: topic,
+          count: "15",
+          freshness: "pw",
         })}`,
         { headers }
-      ),
-      // Skip news search for site-specific filters
-      source === "all" || source === "news"
-        ? fetch(
-            `https://api.search.brave.com/res/v1/news/search?${new URLSearchParams({
-              q: topic,
-              count: "15",
-              freshness: "pw",
-            })}`,
-            { headers }
-          ).catch(() => null)
-        : Promise.resolve(null),
-    ]);
+      ).catch(() => null);
+    }
 
     if (!webRes.ok) {
+      if (webRes.status === 429) {
+        return NextResponse.json(
+          { error: "Search rate limit hit. Please wait a few seconds and try again." },
+          { status: 429 }
+        );
+      }
       const errText = await webRes.text();
       return NextResponse.json(
-        { error: `Brave Search failed: ${webRes.status} ${errText}` },
+        { error: `Search failed: ${webRes.status}` + (errText ? ` - ${errText.slice(0, 200)}` : "") },
         { status: 502 }
       );
     }
