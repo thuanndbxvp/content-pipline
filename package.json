@@ -1,0 +1,43 @@
+{
+  "name": "content-pipeline",
+  "version": "0.1.0",
+  "description": "AI-powered content pipeline: research trending topics, select sources, and generate LinkedIn posts with branded infographics.",
+  "keywords": ["nextjs", "ai", "content-pipeline", "linkedin", "anthropic", "claude", "brave-search", "content-generation"],
+  "author": "Affitor <hello@affitor.com> (https://affitor.com)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Affitor/content-pipeline.git"
+  },
+  "homepage": "https://github.com/Affitor/content-pipeline#readme",
+  "bugs": {
+    "url": "https://github.com/Affitor/content-pipeline/issues"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "lint:fix": "eslint --fix",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
+    "@vercel/og": "^0.11.1",
+    "next": "16.2.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "satori": "^0.26.0",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.1",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

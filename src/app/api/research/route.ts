@@ -1,0 +1,216 @@
+import { NextRequest, NextResponse } from "next/server";
+import type { AISettings, ResearchArticle, ResearchSource } from "@/lib/types";
+import { TAG_RULES, RESEARCH_SOURCES } from "@/lib/types";
+
+export const maxDuration = 60;
+
+interface BraveWebResult {
+  title: string;
+  url: string;
+  description?: string;
+  age?: string;
+  page_age?: string;
+  meta_url?: { hostname?: string };
+}
+
+interface BraveNewsResult {
+  title: string;
+  url: string;
+  description?: string;
+  age?: string;
+  meta_url?: { hostname?: string; netloc?: string };
+}
+
+function parseAge(age: string): number {
+  // Convert Brave age strings to hours for sorting
+  // "2 hours ago" → 2, "3 days ago" → 72, "1 week ago" → 168
+  const match = age.match(/(\d+)\s*(hour|day|week|month)/i);
+  if (!match) return 9999;
+  const num = parseInt(match[1]);
+  const unit = match[2].toLowerCase();
+  if (unit === "hour") return num;
+  if (unit === "day") return num * 24;
+  if (unit === "week") return num * 168;
+  if (unit === "month") return num * 720;
+  return 9999;
+}
+
+function extractSource(url: string, metaUrl?: { hostname?: string; netloc?: string }): string {
+  let hostname = metaUrl?.hostname || metaUrl?.netloc || "";
+  if (!hostname) {
+    try { hostname = new URL(url).hostname; } catch { hostname = url; }
+  }
+  const clean = hostname
+    .replace(/^www\./, "")
+    .replace(/\.com$|\.org$|\.net$|\.io$|\.co$/, "");
+  // Map known domains
+  const domainMap: Record<string, string> = {
+    techcrunch: "TechCrunch",
+    crunchbase: "Crunchbase",
+    forbes: "Forbes",
+    bloomberg: "Bloomberg",
+    reuters: "Reuters",
+    cnbc: "CNBC",
+    venturebeat: "VentureBeat",
+    theverge: "The Verge",
+    wired: "Wired",
+    sifted: "Sifted",
+    pitchbook: "PitchBook",
+    "the-information": "The Information",
+    axios: "Axios",
+    businessinsider: "Business Insider",
+    linkedin: "LinkedIn",
+  };
+  const key = clean.split(".").pop() || clean;
+  return domainMap[key] || key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { topic, source = "all", aiSettings } = (await req.json()) as {
+      topic: string;
+      source?: ResearchSource;
+      aiSettings?: AISettings;
+    };
+
+    if (!topic || typeof topic !== "string") {
+      return NextResponse.json(
+        { error: "Topic is required" },
+        { status: 400 }
+      );
+    }
+
+    const requestBraveKey = aiSettings?.useServerKeys ? undefined : aiSettings?.braveApiKey?.trim();
+    const braveApiKey = requestBraveKey || process.env.BRAVE_SEARCH_API_KEY;
+    if (!braveApiKey) {
+      return NextResponse.json(
+        { error: "Brave Search API key not configured" },
+        { status: 500 }
+      );
+    }
+
+    const headers = {
+      Accept: "application/json",
+      "Accept-Encoding": "gzip",
+      "X-Subscription-Token": braveApiKey,
+    };
+
+    // Build search query with source filter
+    const sourceConfig = RESEARCH_SOURCES.find((s) => s.value === source);
+    const searchQuery = sourceConfig?.query ? `${topic} ${sourceConfig.query}` : topic;
+
+    // Web Search first
+    const webRes = await fetch(
+      `https://api.search.brave.com/res/v1/web/search?${new URLSearchParams({
+        q: searchQuery,
+        count: "20",
+        freshness: "pm",
+        text_decorations: "false",
+      })}`,
+      { headers }
+    );
+
+    // News Search second (sequential to avoid Brave Free plan 1 req/s rate limit)
+    let newsRes: Response | null = null;
+    if (source === "all" || source === "news") {
+      await new Promise((r) => setTimeout(r, 1100)); // wait 1.1s for rate limit
+      newsRes = await fetch(
+        `https://api.search.brave.com/res/v1/news/search?${new URLSearchParams({
+          q: topic,
+          count: "15",
+          freshness: "pw",
+        })}`,
+        { headers }
+      ).catch(() => null);
+    }
+
+    if (!webRes.ok) {
+      if (webRes.status === 429) {
+        return NextResponse.json(
+          { error: "Search rate limit hit. Please wait a few seconds and try again." },
+          { status: 429 }
+        );
+      }
+      const errText = await webRes.text();
+      return NextResponse.json(
+        { error: `Search failed: ${webRes.status}` + (errText ? ` - ${errText.slice(0, 200)}` : "") },
+        { status: 502 }
+      );
+    }
+
+    const webData = await webRes.json();
+    const webResults: BraveWebResult[] = webData.web?.results || [];
+
+    let newsResults: BraveNewsResult[] = [];
+    if (newsRes?.ok) {
+      const newsData = await newsRes.json();
+      newsResults = newsData.results || [];
+    }
+
+    // Combine and deduplicate by URL
+    const seen = new Set<string>();
+    const combined: { title: string; url: string; description: string; age: string; source: string; isNews: boolean }[] = [];
+
+    // News results first — they're fresher and more relevant
+    for (const r of newsResults) {
+      if (!r.title || !r.url || seen.has(r.url)) continue;
+      seen.add(r.url);
+      combined.push({
+        title: r.title,
+        url: r.url,
+        description: r.description || "",
+        age: r.age || "",
+        source: extractSource(r.url, r.meta_url),
+        isNews: true,
+      });
+    }
+
+    // Then web results
+    for (const r of webResults) {
+      if (!r.title || !r.url || seen.has(r.url)) continue;
+      seen.add(r.url);
+      combined.push({
+        title: r.title,
+        url: r.url,
+        description: r.description || "",
+        age: r.age || r.page_age || "",
+        source: extractSource(r.url, r.meta_url),
+        isNews: false,
+      });
+    }
+
+    // Sort: news first, then by freshness (smallest age = most recent)
+    combined.sort((a, b) => {
+      // News always on top
+      if (a.isNews && !b.isNews) return -1;
+      if (!a.isNews && b.isNews) return 1;
+      // Then by age (most recent first)
+      return parseAge(a.age) - parseAge(b.age);
+    });
+
+    const articles: ResearchArticle[] = combined.slice(0, 15).map((r, i) => {
+      // Auto-tag based on title + description
+      const text = `${r.title} ${r.description}`;
+      const matchedTag = TAG_RULES.find((rule) => rule.patterns.test(text));
+
+      return {
+        id: `article-${i}-${Date.now()}`,
+        title: r.title,
+        source: r.source,
+        url: r.url,
+        date: r.age || "Recent",
+        summary: r.description,
+        keyData: r.isNews ? "News" : "",
+        tag: matchedTag?.tag,
+        selected: false,
+      };
+    });
+
+    return NextResponse.json({ articles });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Research failed" },
+      { status: 500 }
+    );
+  }
+}

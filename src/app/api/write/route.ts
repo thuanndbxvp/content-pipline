@@ -1,0 +1,122 @@
+import { NextRequest } from "next/server";
+import Anthropic from "@anthropic-ai/sdk";
+
+export const maxDuration = 60;
+import type { ResearchArticle, ContentFormat, PostLength, ContentLanguage, AISettings } from "@/lib/types";
+import { toplistPrompt } from "@/lib/prompts/toplist";
+import { povPrompt } from "@/lib/prompts/pov";
+import { caseStudyPrompt } from "@/lib/prompts/case-study";
+import { howToPrompt } from "@/lib/prompts/how-to";
+
+type PromptFn = (
+  a: ResearchArticle, l: PostLength, allArticles?: ResearchArticle[],
+  postIndex?: number, totalPosts?: number, tone?: string, customTone?: string,
+  language?: ContentLanguage
+) => string;
+
+const promptFns: Record<ContentFormat, PromptFn> = {
+  toplist: toplistPrompt,
+  pov: povPrompt,
+  "case-study": caseStudyPrompt,
+  "how-to": howToPrompt,
+};
+
+export async function POST(req: NextRequest) {
+  try {
+    const {
+      article, format, length = "medium", allArticles, postIndex, totalPosts,
+      tone = "default", customTone, language = "en", aiSettings
+    } = (await req.json()) as {
+      article: ResearchArticle;
+      format: ContentFormat;
+      length?: PostLength;
+      allArticles?: ResearchArticle[];
+      postIndex?: number;
+      totalPosts?: number;
+      tone?: string;
+      customTone?: string;
+      language?: ContentLanguage;
+      aiSettings?: AISettings;
+    };
+
+    if (!article || !format) {
+      return new Response(JSON.stringify({ error: "article and format required" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const promptFn = promptFns[format];
+    if (!promptFn) {
+      return new Response(JSON.stringify({ error: `Unknown format: ${format}` }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const requestAnthropicKey = aiSettings?.useServerKeys ? undefined : aiSettings?.anthropicApiKey?.trim();
+    const anthropicKey = requestAnthropicKey || process.env.ANTHROPIC_API_KEY;
+    if (!anthropicKey) {
+      return new Response(JSON.stringify({ error: "Anthropic API key not configured" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const client = new Anthropic({ apiKey: anthropicKey });
+    const model = aiSettings?.anthropicModel?.trim() || "claude-sonnet-4-20250514";
+
+    const stream = await client.messages.stream({
+      model,
+      max_tokens: 4096,
+      messages: [
+        {
+          role: "user",
+          content: promptFn(article, length, allArticles, postIndex, totalPosts, tone, customTone, language),
+        },
+      ],
+    });
+
+    const encoder = new TextEncoder();
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const event of stream) {
+            if (
+              event.type === "content_block_delta" &&
+              event.delta.type === "text_delta"
+            ) {
+              const data = JSON.stringify({ text: event.delta.text });
+              controller.enqueue(
+                encoder.encode(`data: ${data}\n\n`)
+              );
+            }
+          }
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : "Stream error";
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ error: errMsg })}\n\n`)
+          );
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(readable, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  } catch (error) {
+    return new Response(
+      JSON.stringify({
+        error: error instanceof Error ? error.message : "Write failed",
+      }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
+}
